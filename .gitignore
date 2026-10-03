@@ -1,0 +1,30 @@
+__pycache__/*# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite databases & local Spooli data
+*.db
+*.sqlite
+*.sqlite3
+
+# 3D Printing slice files & local test files
+*.gcode
+*.3mf
+test_files/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Virtual environments (if accidentally created)
+.venv/
+venv/
+ENV/
+env/
+
+# IDE / Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo
