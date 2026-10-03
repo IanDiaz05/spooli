@@ -68,6 +68,7 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
         print(f"Error: no se encontró el archivo '{file_path_arg}'.")
         return 1
 
+    metadata = None
     try:
         db.init_db()
         metadata = parse_file(resolved)
@@ -124,6 +125,25 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
         print(f"Error al analizar el archivo: {exc}")
         return 1
     except ValueError as exc:
+        if metadata is not None and "no compatible spools" in str(exc).lower():
+            print(
+                f"Error: No hay bobinas de '{metadata.material}' "
+                f"con al menos {metadata.grams}g disponibles."
+            )
+            print("Inventario actual:")
+            try:
+                spools = db.get_all_spools()
+            except Exception:
+                spools = []
+            if not spools:
+                print("  (No hay bobinas registradas en la base de datos)")
+            else:
+                for spool in spools:
+                    print(
+                        f"  - ID {spool['id']}: {spool['material']} "
+                        f"({spool['remaining_weight_g']}g restantes)"
+                    )
+            return 1
         print(f"Error: {exc}")
         return 1
     except Exception as exc:
