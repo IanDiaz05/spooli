@@ -9,6 +9,7 @@ from pathlib import Path
 try:
     from . import db
     from . import core
+    from . import menu
     from .parser import (
         MissingMetadataError,
         UnsupportedFormatError,
@@ -17,6 +18,7 @@ try:
 except ImportError:
     import db
     import core
+    import menu
     from parser import (
         MissingMetadataError,
         UnsupportedFormatError,
@@ -154,7 +156,7 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
 def main(argv=None) -> int:
     args = parse_args(argv)
     if not args.file_path:
-        print("Menú interactivo en construcción...")
+        menu.main_menu()
         return 0
     return run_direct_mode(args.file_path, args.spool, args.yes)
 
