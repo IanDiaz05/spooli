@@ -25,3 +25,11 @@ class InsufficientFilamentError(DomainError):
 
 class SpoolNotFoundError(DomainError):
     """A manually selected spool identifier does not exist."""
+
+
+class UnsupportedFormatError(DomainError):
+    """A file extension is not supported by the parsing engine."""
+
+
+class MissingMetadataError(DomainError):
+    """Required slicer metadata is absent from a parsed file."""
