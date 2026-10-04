@@ -85,7 +85,7 @@ def run_onboarding() -> None:
 
     print("Configuración inicial (pulsa Enter para aceptar el valor por defecto).")
 
-    currency_raw = _onboarding_input("Símbolo de moneda [$]: ")
+    currency_raw = _onboarding_input("Símbolo o código de moneda local (ej. MXN, USD, EUR, $) [$]: ")
     if currency_raw is None or currency_raw.strip() == "":
         currency = "$"
     else:

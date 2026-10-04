@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 APP_DIR_NAME = "spooli"
-DB_FILE_NAME = "filament.db"
+DB_FILE_NAME = "spooli.db"
 
 DEFAULT_SETTINGS = {
     "electricity_kwh_cost": "0.15",
@@ -73,11 +73,39 @@ def init_db(path: Path | str | None = None) -> Path:
                 grams_used REAL NOT NULL CHECK (grams_used >= 0),
                 duration_seconds INTEGER NOT NULL DEFAULT 0 CHECK (duration_seconds >= 0),
                 cost REAL NOT NULL DEFAULT 0 CHECK (cost >= 0),
+                filament_cost REAL NOT NULL DEFAULT 0 CHECK (filament_cost >= 0),
+                electricity_cost REAL NOT NULL DEFAULT 0 CHECK (electricity_cost >= 0),
+                total_cost REAL NOT NULL DEFAULT 0 CHECK (total_cost >= 0),
+                currency_symbol TEXT NOT NULL DEFAULT '$',
                 status TEXT NOT NULL DEFAULT 'completed',
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+        # Safe migration for databases created before snapshot fields existed.
+        existing = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(prints)").fetchall()
+        }
+        if "filament_cost" not in existing:
+            conn.execute(
+                "ALTER TABLE prints ADD COLUMN filament_cost REAL NOT NULL DEFAULT 0"
+            )
+        if "electricity_cost" not in existing:
+            conn.execute(
+                "ALTER TABLE prints ADD COLUMN electricity_cost REAL NOT NULL DEFAULT 0"
+            )
+        if "total_cost" not in existing:
+            conn.execute(
+                "ALTER TABLE prints ADD COLUMN total_cost REAL NOT NULL DEFAULT 0"
+            )
+        if "currency_symbol" not in existing:
+            conn.execute(
+                "ALTER TABLE prints ADD COLUMN currency_symbol TEXT DEFAULT '$'"
+            )
+            conn.execute(
+                "UPDATE prints SET currency_symbol = '$' WHERE currency_symbol IS NULL"
+            )
         conn.executemany(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             list(DEFAULT_SETTINGS.items()),
@@ -192,6 +220,10 @@ def record_print_job(
     cost: float = 0.0,
     status: str = "completed",
     path: Path | str | None = None,
+    filament_cost: float | None = None,
+    electricity_cost: float | None = None,
+    total_cost: float | None = None,
+    currency_symbol: str | None = None,
 ) -> int:
     if not file_name or not file_name.strip():
         raise ValueError("file_name must be a non-empty string")
@@ -201,6 +233,21 @@ def record_print_job(
         raise ValueError("duration_seconds cannot be negative")
     if cost < 0:
         raise ValueError("cost cannot be negative")
+
+    # Resolve snapshot costs, keeping backwards compatibility with cost.
+    resolved_total = float(total_cost) if total_cost is not None else float(cost)
+    if resolved_total < 0:
+        raise ValueError("total_cost cannot be negative")
+    resolved_filament = (
+        float(filament_cost) if filament_cost is not None else resolved_total
+    )
+    if resolved_filament < 0:
+        raise ValueError("filament_cost cannot be negative")
+    resolved_electricity = (
+        float(electricity_cost) if electricity_cost is not None else 0.0
+    )
+    if resolved_electricity < 0:
+        raise ValueError("electricity_cost cannot be negative")
 
     conn = get_connection(path)
     try:
@@ -214,20 +261,55 @@ def record_print_job(
         if spool["remaining_weight_g"] < float(grams_used):
             raise ValueError("spool does not have enough remaining filament")
 
+        # Resolve active currency symbol, defaulting to stored setting or '$'.
+        resolved_currency = currency_symbol
+        if resolved_currency is None or not str(resolved_currency).strip():
+            try:
+                row = conn.execute(
+                    "SELECT value FROM settings WHERE key = 'currency_symbol'"
+                ).fetchone()
+                resolved_currency = (
+                    row["value"] if row and row["value"] else DEFAULT_SETTINGS["currency_symbol"]
+                )
+            except Exception:
+                resolved_currency = DEFAULT_SETTINGS["currency_symbol"]
+        resolved_currency = str(resolved_currency)
+
+        # Detect available snapshot columns (supports pre-migration databases).
+        cols = {
+            row["name"] for row in conn.execute("PRAGMA table_info(prints)").fetchall()
+        }
+        has_filament = "filament_cost" in cols
+        has_electricity = "electricity_cost" in cols
+        has_total = "total_cost" in cols
+        has_currency = "currency_symbol" in cols
+
+        columns = ["spool_id", "file_name", "grams_used", "duration_seconds", "cost", "status"]
+        values: list = [
+            spool_id,
+            file_name.strip(),
+            float(grams_used),
+            int(duration_seconds),
+            resolved_total,
+            status,
+        ]
+        if has_filament:
+            columns.append("filament_cost")
+            values.append(resolved_filament)
+        if has_electricity:
+            columns.append("electricity_cost")
+            values.append(resolved_electricity)
+        if has_total:
+            columns.append("total_cost")
+            values.append(resolved_total)
+        if has_currency:
+            columns.append("currency_symbol")
+            values.append(resolved_currency)
+
+        placeholders = ", ".join(["?"] * len(columns))
         cur = conn.execute(
-            """
-            INSERT INTO prints
-                (spool_id, file_name, grams_used, duration_seconds, cost, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                spool_id,
-                file_name.strip(),
-                float(grams_used),
-                int(duration_seconds),
-                float(cost),
-                status,
-            ),
+            f"INSERT INTO prints ({', '.join(columns)}) VALUES ({placeholders})",
+            tuple(values),
         )
         conn.execute(
             "UPDATE spools SET remaining_weight_g = remaining_weight_g - ? WHERE id = ?",
@@ -288,3 +370,95 @@ def update_failed_print(
         raise
     finally:
         conn.close()
+
+
+def convert_all_spools_currency(
+    multiplier: float, path: Path | str | None = None
+) -> int:
+    # Convert every spool purchase_price by multiplier, atomically.
+    try:
+        factor = float(multiplier)
+    except (TypeError, ValueError):
+        raise ValueError("multiplier must be a valid number")
+    if factor <= 0:
+        raise ValueError("multiplier must be greater than 0")
+
+    conn = get_connection(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute(
+            "UPDATE spools SET purchase_price = ROUND(purchase_price * ?, 2)",
+            (factor,),
+        )
+        updated = cur.rowcount if cur.rowcount is not None else 0
+        conn.execute("COMMIT")
+        return int(updated)
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
+def convert_all_records_currency(
+    multiplier: float, new_currency: str, path: Path | str | None = None
+) -> dict:
+    # Convert spools and historical prints atomically to a new currency.
+    try:
+        factor = float(multiplier)
+    except (TypeError, ValueError):
+        raise ValueError("multiplier must be a valid number")
+    if factor <= 0:
+        raise ValueError("multiplier must be greater than 0")
+    if not new_currency or not str(new_currency).strip():
+        raise ValueError("new_currency must be a non-empty string")
+    symbol = str(new_currency).strip()
+
+    with get_connection(path) as conn:
+        spools_cur = conn.execute(
+            "UPDATE spools SET purchase_price = ROUND(purchase_price * ?, 2)",
+            (factor,),
+        )
+        spools_updated = (
+            spools_cur.rowcount if spools_cur.rowcount is not None else 0
+        )
+        prints_cur = conn.execute(
+            "UPDATE prints SET filament_cost = ROUND(filament_cost * ?, 4), "
+            "electricity_cost = ROUND(electricity_cost * ?, 4), "
+            "total_cost = ROUND(total_cost * ?, 4), "
+            "cost = ROUND(cost * ?, 4), "
+            "currency_symbol = ?",
+            (factor, factor, factor, factor, symbol),
+        )
+        prints_updated = (
+            prints_cur.rowcount if prints_cur.rowcount is not None else 0
+        )
+        return {"spools": int(spools_updated), "prints": int(prints_updated)}
+
+
+def get_print_history(
+    limit: int = 20, path: Path | str | None = None
+) -> list[dict]:
+    # Return recent prints, each keeping its own recorded currency symbol.
+    with get_connection(path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM prints ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        history: list[dict] = []
+        for row in rows:
+            record = dict(row)
+            symbol = record.get("currency_symbol")
+            if symbol is None or not str(symbol).strip():
+                record["currency_symbol"] = DEFAULT_SETTINGS["currency_symbol"]
+            try:
+                amount = float(
+                    record.get("total_cost")
+                    if record.get("total_cost") is not None
+                    else record.get("cost") or 0
+                )
+            except (TypeError, ValueError):
+                amount = 0.0
+            record["display_cost"] = f"{record['currency_symbol']}{amount:.4f}"
+            history.append(record)
+        return history

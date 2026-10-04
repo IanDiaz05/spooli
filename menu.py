@@ -274,7 +274,7 @@ def show_history(limit: int = 20) -> None:
         print("No hay impresiones registradas todavía.")
         return
 
-    currency = db.get_setting("currency_symbol") or "$"
+    default_currency = (db.get_setting("currency_symbol") or "$").strip() or "$"
     header = (
         f"{'ID':<5} {'Archivo':<28} {'Bobina':<7} "
         f"{'Gramos':<8} {'Costo':<12} {'Estado'}"
@@ -285,13 +285,21 @@ def show_history(limit: int = 20) -> None:
     total_grams = 0.0
     for record in prints:
         try:
-            cost = float(record.get("cost") or 0)
+            cost = float(
+                record.get("total_cost")
+                if record.get("total_cost") is not None
+                else record.get("cost") or 0
+            )
         except (TypeError, ValueError):
             cost = 0.0
         try:
             grams = float(record.get("grams_used") or 0)
         except (TypeError, ValueError):
             grams = 0.0
+        # Each print keeps its own recorded currency symbol (snapshot integrity).
+        record_currency = str(
+            record.get("currency_symbol") or default_currency
+        ).strip() or default_currency
         total_cost += cost
         total_grams += grams
         print(
@@ -299,13 +307,13 @@ def show_history(limit: int = 20) -> None:
             f"{str(record.get('file_name') or '-')[:28]:<28} "
             f"{str(record.get('spool_id')):<7} "
             f"{grams:<8.2f} "
-            f"{currency}{cost:<11.4f} "
+            f"{record_currency}{cost:<11.4f} "
             f"{record.get('status')}"
         )
     print("-" * len(header))
     print(f"Total impresiones: {len(prints)}")
     print(f"Filamento total consumido: {total_grams:.2f} g")
-    print(f"Costo total: {currency}{total_cost:.4f}")
+    print(f"Costo total: {default_currency}{total_cost:.4f}")
 
 
 def show_settings() -> None:
@@ -348,7 +356,85 @@ def show_settings() -> None:
                 return None
             db.set_setting("printer_power_watts", str(new_watts))
         if currency_raw.strip() != "":
-            db.set_setting("currency_symbol", currency_raw.strip())
+            new_currency = currency_raw.strip()
+            if new_currency != currency:
+                try:
+                    spools = db.get_all_spools()
+                except Exception as exc:
+                    print(f"{RED}Error al obtener las bobinas: {exc}{RESET}")
+                    return None
+                if not spools:
+                    db.set_setting("currency_symbol", new_currency)
+                else:
+                    count = len(spools)
+                    print(
+                        f"{YELLOW}Atención: Tienes {count} bobina(s) registradas "
+                        f"con la moneda anterior ({currency}).{RESET}"
+                    )
+                    print("1. Convertir precios de bobinas con tipo de cambio")
+                    print("2. Solo cambiar el símbolo (mantener los importes actuales)")
+                    print("3. Cancelar cambio de moneda")
+                    option_raw = _safe_input("Selecciona una opción (1-3): ")
+                    if option_raw is None:
+                        return None
+                    option = option_raw.strip()
+                    if option == "1":
+                        print(
+                            "Se convertirán los precios del inventario y el historial "
+                            "de impresiones al nuevo valor."
+                        )
+                        rate_raw = _safe_input(
+                            f"Tipo de cambio (1 {currency} = X {new_currency}): "
+                        )
+                        if rate_raw is None:
+                            return None
+                        try:
+                            multiplier = float(rate_raw.strip().replace(",", "."))
+                        except ValueError:
+                            print(
+                                f"{RED}Error: el tipo de cambio debe ser un número válido.{RESET}"
+                            )
+                            return None
+                        if multiplier <= 0:
+                            print(
+                                f"{RED}Error: el tipo de cambio debe ser mayor que cero.{RESET}"
+                            )
+                            return None
+                        try:
+                            result = db.convert_all_records_currency(
+                                multiplier, new_currency
+                            )
+                        except Exception as exc:
+                            print(
+                                f"{RED}Error al convertir los precios: {exc}{RESET}"
+                            )
+                            return None
+                        db.set_setting("currency_symbol", new_currency)
+                        if isinstance(result, dict):
+                            spools_n = result.get("spools", 0)
+                            prints_n = result.get("prints", 0)
+                            print(
+                                f"{GREEN}Precios de {spools_n} bobina(s) y "
+                                f"{prints_n} registro(s) del historial convertidos correctamente.{RESET}"
+                            )
+                        else:
+                            print(
+                                f"{GREEN}Precios convertidos correctamente.{RESET}"
+                            )
+                    elif option == "2":
+                        db.set_setting("currency_symbol", new_currency)
+                        print(
+                            "Solo se cambió el símbolo. Los importes numéricos y "
+                            "el historial conservan sus valores anteriores."
+                        )
+                    elif option == "3":
+                        print("Cambio de moneda cancelado. Se mantiene la moneda anterior.")
+                    else:
+                        print(
+                            f"{YELLOW}Opción no válida. Cambio de moneda cancelado.{RESET}"
+                        )
+            else:
+                db.set_setting("currency_symbol", new_currency)
     except ValueError:
         print(f"{RED}Error: el valor debe ser un número válido.{RESET}")
         return None
