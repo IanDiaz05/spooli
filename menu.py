@@ -91,36 +91,45 @@ def show_inventory() -> None:
     print(f"\nTotal de bobinas: {len(spools)}")
 
 
+DEFAULT_BRAND = "Sunlu"
+DEFAULT_MATERIAL = "PLA"
+DEFAULT_COLOR = "Blanco"
+DEFAULT_WEIGHT_G = "1000"
+DEFAULT_PRICE = "19.99"
+
+
 def create_spool_form() -> int | None:
     """Guide the user through spool creation. Returns new spool id or None."""
     print(f"\n{BOLD}{CYAN}=== Registrar Nueva Bobina ==={RESET}")
+    print(f"{CYAN}(Pulsa Enter para aceptar el valor por defecto){RESET}")
 
-    brand_raw = _safe_input("Marca (ej. Sunlu): ")
+    brand_raw = _safe_input(f"Marca [{DEFAULT_BRAND}]: ")
     if brand_raw is None:
         return None
-    material_raw = _safe_input("Material (ej. PLA): ")
+    material_raw = _safe_input(f"Material [{DEFAULT_MATERIAL}]: ")
     if material_raw is None:
         return None
-    color_raw = _safe_input("Color (ej. Negro): ")
+    color_raw = _safe_input(f"Color [{DEFAULT_COLOR}]: ")
     if color_raw is None:
         return None
-    weight_raw = _safe_input("Peso inicial en gramos (ej. 1000): ")
+    weight_raw = _safe_input(f"Peso inicial en gramos [{DEFAULT_WEIGHT_G}]: ")
     if weight_raw is None:
         return None
-    price_raw = _safe_input("Precio de compra (ej. 19.99): ")
+    price_raw = _safe_input(f"Precio de compra [{DEFAULT_PRICE}]: ")
     if price_raw is None:
         return None
 
-    brand = brand_raw.strip() or None
-    material = material_raw.strip()
-    color = color_raw.strip() or None
+    brand = brand_raw.strip() or DEFAULT_BRAND
+    material = material_raw.strip() or DEFAULT_MATERIAL
+    color = color_raw.strip() or DEFAULT_COLOR
 
     if not material:
         print(f"{RED}Error: el material no puede estar vacío.{RESET}")
         return None
 
+    weight_text = weight_raw.strip().replace(",", ".") or DEFAULT_WEIGHT_G
     try:
-        initial_weight = float(weight_raw.strip().replace(",", "."))
+        initial_weight = float(weight_text)
     except ValueError:
         print(f"{RED}Error: el peso inicial debe ser un número válido.{RESET}")
         return None
@@ -128,18 +137,15 @@ def create_spool_form() -> int | None:
         print(f"{RED}Error: el peso inicial debe ser mayor que cero.{RESET}")
         return None
 
-    price_text = price_raw.strip().replace(",", ".")
-    if price_text == "":
-        price = 0.0
-    else:
-        try:
-            price = float(price_text)
-        except ValueError:
-            print(f"{RED}Error: el precio debe ser un número válido.{RESET}")
-            return None
-        if price < 0:
-            print(f"{RED}Error: el precio no puede ser negativo.{RESET}")
-            return None
+    price_text = price_raw.strip().replace(",", ".") or DEFAULT_PRICE
+    try:
+        price = float(price_text)
+    except ValueError:
+        print(f"{RED}Error: el precio debe ser un número válido.{RESET}")
+        return None
+    if price < 0:
+        print(f"{RED}Error: el precio no puede ser negativo.{RESET}")
+        return None
 
     try:
         spool_id = db.create_spool(
