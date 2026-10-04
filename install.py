@@ -35,7 +35,7 @@ def target_in_path(target: Path) -> bool:
     return False
 
 
-def install_unix(main_path: Path) -> int:
+def install_unix(main_path: Path, quiet: bool = False) -> int:
     # Install bash wrapper into ~/.local/bin.
     target_dir = Path.home() / ".local" / "bin"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -47,13 +47,16 @@ def install_unix(main_path: Path) -> int:
         wrapper,
         current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH,
     )
-    print(f"Comando 'spooli' instalado correctamente en: {wrapper}")
+    if not quiet:
+        print(f"Comando 'spooli' instalado correctamente en: {wrapper}")
     if target_in_path(target_dir):
-        print("La instalación está lista. Ya puedes usar el comando 'spooli'.")
+        if not quiet:
+            print("La instalación está lista. Ya puedes usar el comando 'spooli'.")
     else:
-        print(f"Advertencia: el directorio '{target_dir}' no está en el PATH.")
-        print("Reinicia tu terminal o agrega esta línea a tu ~/.bashrc o ~/.zshrc:")
-        print(f'  export PATH="$HOME/.local/bin:$PATH"')
+        if not quiet:
+            print(f"Advertencia: el directorio '{target_dir}' no está en el PATH.")
+            print("Reinicia tu terminal o agrega esta línea a tu ~/.bashrc o ~/.zshrc:")
+            print(f'  export PATH="$HOME/.local/bin:$PATH"')
     return 0
 
 
@@ -67,7 +70,7 @@ def resolve_windows_target() -> Path:
     return candidate
 
 
-def install_windows(main_path: Path) -> int:
+def install_windows(main_path: Path, quiet: bool = False) -> int:
     # Install batch wrapper spooli.cmd into a user-level dir.
     target_dir = resolve_windows_target()
     try:
@@ -79,24 +82,46 @@ def install_windows(main_path: Path) -> int:
     wrapper = target_dir / "spooli.cmd"
     content = f'@echo off\r\npython "{main_path}" %*\r\n'
     wrapper.write_text(content, encoding="utf-8")
-    print(f"Comando 'spooli' instalado correctamente en: {wrapper}")
+    if not quiet:
+        print(f"Comando 'spooli' instalado correctamente en: {wrapper}")
     if target_in_path(target_dir):
-        print("La instalación está lista. Ya puedes usar el comando 'spooli'.")
+        if not quiet:
+            print("La instalación está lista. Ya puedes usar el comando 'spooli'.")
     else:
-        print(f"Advertencia: el directorio '{target_dir}' no está en el PATH.")
-        print("Reinicia tu terminal para que los cambios surtan efecto")
-        print("o agrega el directorio al PATH del usuario en la configuración de Windows.")
+        if not quiet:
+            print(f"Advertencia: el directorio '{target_dir}' no está en el PATH.")
+            print("Reinicia tu terminal para que los cambios surtan efecto")
+            print("o agrega el directorio al PATH del usuario en la configuración de Windows.")
     return 0
 
 
-def main() -> int:
-    main_path = resolve_main_path()
+def install_cli(quiet: bool = False) -> bool:
+    # Import-safe entry point: install global spooli command, no subprocess needed.
+    try:
+        main_path = resolve_main_path()
+    except Exception:
+        if not quiet:
+            print("Error: no se pudo resolver la ruta de 'main.py'.")
+        return False
     if not main_path.is_file():
-        print(f"Error: no se encontró el archivo '{main_path}'.")
-        return 1
-    if is_unix():
-        return install_unix(main_path)
-    return install_windows(main_path)
+        if not quiet:
+            print(f"Error: no se encontró el archivo '{main_path}'.")
+        return False
+    try:
+        if is_unix():
+            code = install_unix(main_path, quiet=quiet)
+        else:
+            code = install_windows(main_path, quiet=quiet)
+        return code == 0
+    except Exception as exc:
+        if not quiet:
+            print(f"Error durante la instalación: {exc}")
+        return False
+
+
+def main() -> int:
+    ok = install_cli(quiet=False)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

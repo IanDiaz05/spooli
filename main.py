@@ -10,6 +10,7 @@ try:
     from . import db
     from . import core
     from . import menu
+    from . import install
     from .parser import (
         MissingMetadataError,
         UnsupportedFormatError,
@@ -19,6 +20,7 @@ except ImportError:
     import db
     import core
     import menu
+    import install
     from parser import (
         MissingMetadataError,
         UnsupportedFormatError,
@@ -32,6 +34,100 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--spool", type=int, default=None, help="ID de bobina a usar")
     parser.add_argument("--yes", "-y", action="store_true", help="Omitir confirmacion")
     return parser.parse_args(argv)
+
+
+def is_first_run() -> bool:
+    # Check DB file existence without creating or initializing it.
+    try:
+        db_path = db.get_db_path()
+    except Exception:
+        return False
+    return not db_path.is_file()
+
+
+def _onboarding_input(prompt: str) -> str | None:
+    # Prompt helper that returns None on EOF/interrupt.
+    try:
+        return input(prompt)
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+
+def run_onboarding() -> None:
+    # First-run wizard: welcome, optional global install, basic settings.
+    print("=== Bienvenido a Spooli ===")
+    print("Parece que es la primera vez que inicias Spooli.")
+    print("Vamos a realizar una configuración inicial rápida.")
+
+    answer = _onboarding_input(
+        "¿Deseas instalar 'spooli' como comando global en tu sistema? [Y/n]: "
+    )
+    if answer is None:
+        print("Instalación global omitida.")
+    elif answer.strip() == "" or answer.strip().lower() in (
+        "y",
+        "yes",
+        "s",
+        "si",
+        "sí",
+    ):
+        try:
+            ok = install.install_cli(quiet=False)
+        except Exception as exc:
+            ok = False
+            print(f"Error durante la instalación: {exc}")
+        if not ok:
+            print("No se pudo completar la instalación global.")
+            print("Puedes intentarlo más tarde con: python3 install.py")
+    else:
+        print("De acuerdo, puedes instalarlo más tarde con: python3 install.py")
+
+    print("Configuración inicial (pulsa Enter para aceptar el valor por defecto).")
+
+    currency_raw = _onboarding_input("Símbolo de moneda [$]: ")
+    if currency_raw is None or currency_raw.strip() == "":
+        currency = "$"
+    else:
+        currency = currency_raw.strip()
+
+    kwh_raw = _onboarding_input("Costo de electricidad por kWh [0.15]: ")
+    if kwh_raw is None or kwh_raw.strip() == "":
+        kwh_cost = "0.15"
+    else:
+        try:
+            kwh_value = float(kwh_raw.strip().replace(",", "."))
+            if kwh_value < 0:
+                print("Valor no válido, se usará el valor por defecto: 0.15")
+                kwh_cost = "0.15"
+            else:
+                kwh_cost = str(kwh_value)
+        except ValueError:
+            print("Valor no válido, se usará el valor por defecto: 0.15")
+            kwh_cost = "0.15"
+
+    watts_raw = _onboarding_input(
+        "Consumo estimado de la impresora en Watts [150]: "
+    )
+    if watts_raw is None or watts_raw.strip() == "":
+        watts = "150"
+    else:
+        try:
+            watts_value = float(watts_raw.strip().replace(",", "."))
+            if watts_value < 0:
+                print("Valor no válido, se usará el valor por defecto: 150")
+                watts = "150"
+            else:
+                watts = str(watts_value)
+        except ValueError:
+            print("Valor no válido, se usará el valor por defecto: 150")
+            watts = "150"
+
+    db.init_db()
+    db.set_setting("currency_symbol", currency)
+    db.set_setting("electricity_kwh_cost", kwh_cost)
+    db.set_setting("printer_power_watts", watts)
+    print("Configuración guardada correctamente.")
 
 
 def format_duration(total_seconds: int) -> str:
@@ -117,6 +213,10 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
             grams_used=float(metadata.grams),
             duration_seconds=int(metadata.duration_seconds),
             cost=float(costs.total_cost),
+            filament_cost=float(costs.filament_cost),
+            electricity_cost=float(costs.electricity_cost),
+            total_cost=float(costs.total_cost),
+            currency_symbol=currency,
         )
         print(f"Impresión registrada correctamente con ID {print_id}.")
         return 0
@@ -155,6 +255,9 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    # First-run check before any DB initialization or connection.
+    if is_first_run():
+        run_onboarding()
     if not args.file_path:
         menu.main_menu()
         return 0
