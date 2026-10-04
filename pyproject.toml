@@ -24,4 +24,4 @@ dependencies = []
 
 [tool.setuptools]
 py-modules = ["core", "db", "parser", "menu", "install", "main"]
-packages = ["spooli", "spooli.constants", "spooli.storage", "spooli.domain", "spooli.parsing", "spooli.services", "spooli.ui", "spooli.ui.screens"]
+packages = ["spooli", "spooli.cli", "spooli.constants", "spooli.storage", "spooli.domain", "spooli.parsing", "spooli.services", "spooli.ui", "spooli.ui.screens"]
