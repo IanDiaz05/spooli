@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Union
 
-GRAMS_PER_METER_DEFAULT = 3.0
+from spooli.constants.thresholds import (
+    GRAMS_PER_METER_DEFAULT,
+    MM_PER_METER,
+    SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
+)
 
 
 @dataclass
@@ -109,13 +114,13 @@ def _parse_duration_to_seconds(text: str) -> int | None:
     match = _RE_HHMMSS.search(text)
     if match:
         h, m, s = (int(match.group(i)) for i in (1, 2, 3))
-        return h * 3600 + m * 60 + s
+        return int(h * SECONDS_PER_HOUR + m * SECONDS_PER_MINUTE + s)
     match = _RE_HMS_WORDS.search(text)
     if match and any(match.groups()):
         h = int(match.group(1)) if match.group(1) else 0
         m = int(match.group(2)) if match.group(2) else 0
         s = float(match.group(3)) if match.group(3) else 0.0
-        return int(h * 3600 + m * 60 + s)
+        return int(h * SECONDS_PER_HOUR + m * SECONDS_PER_MINUTE + s)
     return None
 
 
@@ -173,13 +178,13 @@ def _update_from_line(line: str, acc: _Accumulator) -> None:
         if match:
             value = _sum_number_list(match.group(1))
             if value is not None:
-                acc.length_mm = value * 1000.0
+                acc.length_mm = value * MM_PER_METER
 
     if acc.length_mm is None:
         match = _RE_CURA_USED.search(line)
         if match:
             try:
-                acc.length_mm = float(match.group(1)) * 1000.0
+                acc.length_mm = float(match.group(1)) * MM_PER_METER
             except ValueError:
                 pass
 
@@ -227,7 +232,7 @@ def _parse_stream(lines: Iterable[str], file_name: str) -> PrintMetadata:
     grams = acc.grams
     length_mm = acc.length_mm or 0.0
     if grams is None and acc.length_mm is not None:
-        grams = acc.length_mm / 1000.0 * GRAMS_PER_METER_DEFAULT
+        grams = acc.length_mm / MM_PER_METER * GRAMS_PER_METER_DEFAULT
     if grams is None:
         raise MissingMetadataError(
             f"no filament weight or length metadata found in {file_name}"

@@ -11,6 +11,9 @@ try:
 except ImportError:
     from db import get_compatible_spools, get_spool_by_id
 
+from spooli.constants.formats import GRAMS_DECIMALS, MONEY_DECIMALS
+from spooli.constants.thresholds import PERCENT_MAX, SECONDS_PER_HOUR, WATTS_PER_KW
+
 
 @dataclass(frozen=True)
 class SpoolSelectionResult:
@@ -102,13 +105,17 @@ def calculate_costs(
         raise ValueError("kwh_cost cannot be negative")
 
     filament_cost = (spool_price / spool_initial_weight) * grams
-    electricity_cost = (printer_watts / 1000.0) * (duration_seconds / 3600.0) * kwh_cost
+    electricity_cost = (
+        (printer_watts / WATTS_PER_KW)
+        * (duration_seconds / SECONDS_PER_HOUR)
+        * kwh_cost
+    )
     total_cost = filament_cost + electricity_cost
 
     return CostBreakdown(
-        filament_cost=round(filament_cost, 4),
-        electricity_cost=round(electricity_cost, 4),
-        total_cost=round(total_cost, 4),
+        filament_cost=round(filament_cost, MONEY_DECIMALS),
+        electricity_cost=round(electricity_cost, MONEY_DECIMALS),
+        total_cost=round(total_cost, MONEY_DECIMALS),
     )
 
 
@@ -131,17 +138,17 @@ def calculate_refund(
         raise ValueError("actual_usage cannot be negative")
 
     if is_percent:
-        if actual_usage > 100:
+        if actual_usage > PERCENT_MAX:
             raise ValueError("failure percentage cannot exceed 100")
-        actual_consumption = estimated_grams * (actual_usage / 100.0)
+        actual_consumption = estimated_grams * (actual_usage / PERCENT_MAX)
     else:
         actual_consumption = actual_usage
 
-    actual_consumption = round(actual_consumption, 2)
+    actual_consumption = round(actual_consumption, GRAMS_DECIMALS)
     if actual_consumption > estimated_grams:
         raise ValueError("actual consumption cannot exceed estimated grams")
 
-    refund_grams = round(estimated_grams - actual_consumption, 2)
+    refund_grams = round(estimated_grams - actual_consumption, GRAMS_DECIMALS)
 
     return RefundResult(
         estimated_grams=estimated_grams,

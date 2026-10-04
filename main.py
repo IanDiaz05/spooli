@@ -27,6 +27,16 @@ except ImportError:
         parse_file,
     )
 
+from spooli.constants.defaults import DEFAULT_SETTINGS, SettingKey
+from spooli.constants.formats import GRAMS_DECIMALS, MONEY_DECIMALS, YES_TOKENS
+from spooli.constants.messages import (
+    MSG_FILE_NOT_FOUND,
+    MSG_INVALID_VALUE_FALLBACK,
+    MSG_OPERATION_CANCELLED,
+)
+from spooli.constants.paths import INSTALL_SCRIPT_NAME
+from spooli.constants.thresholds import SECONDS_PER_HOUR, SECONDS_PER_MINUTE
+
 
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Spooli - control de filamento")
@@ -65,13 +75,7 @@ def run_onboarding() -> None:
     )
     if answer is None:
         print("Instalación global omitida.")
-    elif answer.strip() == "" or answer.strip().lower() in (
-        "y",
-        "yes",
-        "s",
-        "si",
-        "sí",
-    ):
+    elif answer.strip() == "" or answer.strip().lower() in YES_TOKENS:
         try:
             ok = install.install_cli(quiet=False)
         except Exception as exc:
@@ -79,60 +83,67 @@ def run_onboarding() -> None:
             print(f"Error durante la instalación: {exc}")
         if not ok:
             print("No se pudo completar la instalación global.")
-            print("Puedes intentarlo más tarde con: python3 install.py")
+            print(f"Puedes intentarlo más tarde con: python3 {INSTALL_SCRIPT_NAME}")
     else:
-        print("De acuerdo, puedes instalarlo más tarde con: python3 install.py")
+        print(
+            f"De acuerdo, puedes instalarlo más tarde con: python3 {INSTALL_SCRIPT_NAME}"
+        )
 
     print("Configuración inicial (pulsa Enter para aceptar el valor por defecto).")
 
-    currency_raw = _onboarding_input("Símbolo o código de moneda local (ej. MXN, USD, EUR, $) [$]: ")
+    currency_default = DEFAULT_SETTINGS[SettingKey.CURRENCY_SYMBOL.value]
+    currency_raw = _onboarding_input(
+        f"Símbolo o código de moneda local (ej. MXN, USD, EUR, $) [{currency_default}]: "
+    )
     if currency_raw is None or currency_raw.strip() == "":
-        currency = "$"
+        currency = currency_default
     else:
         currency = currency_raw.strip()
 
-    kwh_raw = _onboarding_input("Costo de electricidad por kWh [0.15]: ")
+    kwh_default = DEFAULT_SETTINGS[SettingKey.ELECTRICITY_KWH_COST.value]
+    kwh_raw = _onboarding_input(f"Costo de electricidad por kWh [{kwh_default}]: ")
     if kwh_raw is None or kwh_raw.strip() == "":
-        kwh_cost = "0.15"
+        kwh_cost = kwh_default
     else:
         try:
             kwh_value = float(kwh_raw.strip().replace(",", "."))
             if kwh_value < 0:
-                print("Valor no válido, se usará el valor por defecto: 0.15")
-                kwh_cost = "0.15"
+                print(MSG_INVALID_VALUE_FALLBACK.format(default=kwh_default))
+                kwh_cost = kwh_default
             else:
                 kwh_cost = str(kwh_value)
         except ValueError:
-            print("Valor no válido, se usará el valor por defecto: 0.15")
-            kwh_cost = "0.15"
+            print(MSG_INVALID_VALUE_FALLBACK.format(default=kwh_default))
+            kwh_cost = kwh_default
 
+    watts_default = DEFAULT_SETTINGS[SettingKey.PRINTER_POWER_WATTS.value]
     watts_raw = _onboarding_input(
-        "Consumo estimado de la impresora en Watts [150]: "
+        f"Consumo estimado de la impresora en Watts [{watts_default}]: "
     )
     if watts_raw is None or watts_raw.strip() == "":
-        watts = "150"
+        watts = watts_default
     else:
         try:
             watts_value = float(watts_raw.strip().replace(",", "."))
             if watts_value < 0:
-                print("Valor no válido, se usará el valor por defecto: 150")
-                watts = "150"
+                print(MSG_INVALID_VALUE_FALLBACK.format(default=watts_default))
+                watts = watts_default
             else:
                 watts = str(watts_value)
         except ValueError:
-            print("Valor no válido, se usará el valor por defecto: 150")
-            watts = "150"
+            print(MSG_INVALID_VALUE_FALLBACK.format(default=watts_default))
+            watts = watts_default
 
     db.init_db()
-    db.set_setting("currency_symbol", currency)
-    db.set_setting("electricity_kwh_cost", kwh_cost)
-    db.set_setting("printer_power_watts", watts)
+    db.set_setting(SettingKey.CURRENCY_SYMBOL.value, currency)
+    db.set_setting(SettingKey.ELECTRICITY_KWH_COST.value, kwh_cost)
+    db.set_setting(SettingKey.PRINTER_POWER_WATTS.value, watts)
     print("Configuración guardada correctamente.")
 
 
 def format_duration(total_seconds: int) -> str:
-    hours, remainder = divmod(int(total_seconds), 3600)
-    minutes, seconds = divmod(remainder, 60)
+    hours, remainder = divmod(int(total_seconds), int(SECONDS_PER_HOUR))
+    minutes, seconds = divmod(remainder, int(SECONDS_PER_MINUTE))
     if hours > 0:
         return f"{hours}h {minutes}m {seconds}s"
     if minutes > 0:
@@ -147,14 +158,14 @@ def display_summary(metadata, spool: dict, costs, currency: str) -> float:
     print("--- Resumen de impresión ---")
     print(f"Archivo: {metadata.file_name}")
     print(f"Material: {metadata.material}")
-    print(f"Peso requerido: {metadata.grams:.2f} g")
+    print(f"Peso requerido: {metadata.grams:.{GRAMS_DECIMALS}f} g")
     print(f"Duración estimada: {format_duration(metadata.duration_seconds)}")
     print(f"Bobina asignada: ID {spool['id']} ({spool_name})")
-    print(f"Restante en bobina: {float(spool['remaining_weight_g']):.2f} g")
-    print(f"Restante tras impresión: {remaining_after:.2f} g")
-    print(f"Costo filamento: {currency}{costs.filament_cost:.4f}")
-    print(f"Costo electricidad: {currency}{costs.electricity_cost:.4f}")
-    print(f"Costo total estimado: {currency}{costs.total_cost:.4f}")
+    print(f"Restante en bobina: {float(spool['remaining_weight_g']):.{GRAMS_DECIMALS}f} g")
+    print(f"Restante tras impresión: {remaining_after:.{GRAMS_DECIMALS}f} g")
+    print(f"Costo filamento: {currency} {costs.filament_cost:.{MONEY_DECIMALS}f}")
+    print(f"Costo electricidad: {currency} {costs.electricity_cost:.{MONEY_DECIMALS}f}")
+    print(f"Costo total estimado: {currency} {costs.total_cost:.{MONEY_DECIMALS}f}")
     return remaining_after
 
 
@@ -163,7 +174,7 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
     if not resolved.is_absolute():
         resolved = Path.cwd() / resolved
     if not resolved.is_file():
-        print(f"Error: no se encontró el archivo '{file_path_arg}'.")
+        print(MSG_FILE_NOT_FOUND.format(file_path=file_path_arg))
         return 1
 
     metadata = None
@@ -171,9 +182,18 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
         db.init_db()
         metadata = parse_file(resolved)
 
-        kwh_cost = float(db.get_setting("electricity_kwh_cost") or 0.15)
-        printer_watts = float(db.get_setting("printer_power_watts") or 150)
-        currency = db.get_setting("currency_symbol") or "$"
+        kwh_cost = float(
+            db.get_setting(SettingKey.ELECTRICITY_KWH_COST.value)
+            or DEFAULT_SETTINGS[SettingKey.ELECTRICITY_KWH_COST.value]
+        )
+        printer_watts = float(
+            db.get_setting(SettingKey.PRINTER_POWER_WATTS.value)
+            or DEFAULT_SETTINGS[SettingKey.PRINTER_POWER_WATTS.value]
+        )
+        currency = (
+            db.get_setting(SettingKey.CURRENCY_SYMBOL.value)
+            or DEFAULT_SETTINGS[SettingKey.CURRENCY_SYMBOL.value]
+        )
 
         selection = core.select_spool(
             metadata.material, metadata.grams, manual_spool_id=spool_id
@@ -199,12 +219,12 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
             try:
                 answer = input("¿Registrar impresión? [y/N]: ").strip().lower()
             except (EOFError, KeyboardInterrupt):
-                print("\nOperación cancelada por el usuario.")
+                print(f"\n{MSG_OPERATION_CANCELLED}")
                 return 1
-            confirmed = answer in ("y", "yes", "s", "si", "sí")
+            confirmed = answer in YES_TOKENS
 
         if not confirmed:
-            print("Operación cancelada por el usuario.")
+            print(MSG_OPERATION_CANCELLED)
             return 0
 
         print_id = db.record_print_job(
@@ -221,7 +241,7 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
         print(f"Impresión registrada correctamente con ID {print_id}.")
         return 0
     except FileNotFoundError:
-        print(f"Error: no se encontró el archivo '{file_path_arg}'.")
+        print(MSG_FILE_NOT_FOUND.format(file_path=file_path_arg))
         return 1
     except (UnsupportedFormatError, MissingMetadataError) as exc:
         print(f"Error al analizar el archivo: {exc}")

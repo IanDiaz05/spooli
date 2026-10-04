@@ -4,14 +4,14 @@ import os
 import sqlite3
 from pathlib import Path
 
-APP_DIR_NAME = "spooli"
-DB_FILE_NAME = "spooli.db"
-
-DEFAULT_SETTINGS = {
-    "electricity_kwh_cost": "0.15",
-    "printer_power_watts": "150",
-    "currency_symbol": "$",
-}
+from spooli.constants.defaults import (
+    DEFAULT_HISTORY_LIMIT,
+    DEFAULT_SETTINGS,
+    DEFAULT_WEIGHT_G_FLOAT,
+    SettingKey,
+)
+from spooli.constants.formats import MONEY_FORMAT
+from spooli.constants.paths import APP_DIR_NAME, DB_FILE_NAME
 
 
 def get_data_dir() -> Path:
@@ -136,7 +136,7 @@ def set_setting(key: str, value: str, path: Path | str | None = None) -> None:
 def create_spool(
     material: str,
     color: str | None = None,
-    initial_weight_g: float = 1000.0,
+    initial_weight_g: float = DEFAULT_WEIGHT_G_FLOAT,
     purchase_price: float = 0.0,
     brand: str | None = None,
     remaining_weight_g: float | None = None,
@@ -269,10 +269,12 @@ def record_print_job(
                     "SELECT value FROM settings WHERE key = 'currency_symbol'"
                 ).fetchone()
                 resolved_currency = (
-                    row["value"] if row and row["value"] else DEFAULT_SETTINGS["currency_symbol"]
+                    row["value"]
+                    if row and row["value"]
+                    else DEFAULT_SETTINGS[SettingKey.CURRENCY_SYMBOL.value]
                 )
             except Exception:
-                resolved_currency = DEFAULT_SETTINGS["currency_symbol"]
+                resolved_currency = DEFAULT_SETTINGS[SettingKey.CURRENCY_SYMBOL.value]
         resolved_currency = str(resolved_currency)
 
         # Detect available snapshot columns (supports pre-migration databases).
@@ -437,7 +439,7 @@ def convert_all_records_currency(
 
 
 def get_print_history(
-    limit: int = 20, path: Path | str | None = None
+    limit: int = DEFAULT_HISTORY_LIMIT, path: Path | str | None = None
 ) -> list[dict]:
     # Return recent prints, each keeping its own recorded currency symbol.
     with get_connection(path) as conn:
@@ -450,7 +452,9 @@ def get_print_history(
             record = dict(row)
             symbol = record.get("currency_symbol")
             if symbol is None or not str(symbol).strip():
-                record["currency_symbol"] = DEFAULT_SETTINGS["currency_symbol"]
+                record["currency_symbol"] = DEFAULT_SETTINGS[
+                    SettingKey.CURRENCY_SYMBOL.value
+                ]
             try:
                 amount = float(
                     record.get("total_cost")
@@ -459,6 +463,8 @@ def get_print_history(
                 )
             except (TypeError, ValueError):
                 amount = 0.0
-            record["display_cost"] = f"{record['currency_symbol']}{amount:.4f}"
+            record["display_cost"] = (
+                f"{record['currency_symbol']}{amount:{MONEY_FORMAT}}"
+            )
             history.append(record)
         return history
