@@ -36,6 +36,7 @@ from spooli.constants.messages import (
 )
 from spooli.constants.paths import INSTALL_SCRIPT_NAME
 from spooli.constants.thresholds import SECONDS_PER_HOUR, SECONDS_PER_MINUTE
+from spooli.domain.errors import NoCompatibleSpoolError
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -163,9 +164,9 @@ def display_summary(metadata, spool: dict, costs, currency: str) -> float:
     print(f"Bobina asignada: ID {spool['id']} ({spool_name})")
     print(f"Restante en bobina: {float(spool['remaining_weight_g']):.{GRAMS_DECIMALS}f} g")
     print(f"Restante tras impresión: {remaining_after:.{GRAMS_DECIMALS}f} g")
-    print(f"Costo filamento: {currency} {costs.filament_cost:.{MONEY_DECIMALS}f}")
-    print(f"Costo electricidad: {currency} {costs.electricity_cost:.{MONEY_DECIMALS}f}")
-    print(f"Costo total estimado: {currency} {costs.total_cost:.{MONEY_DECIMALS}f}")
+    print(f"Costo filamento: {currency}{costs.filament_cost:.{MONEY_DECIMALS}f}")
+    print(f"Costo electricidad: {currency}{costs.electricity_cost:.{MONEY_DECIMALS}f}")
+    print(f"Costo total estimado: {currency}{costs.total_cost:.{MONEY_DECIMALS}f}")
     return remaining_after
 
 
@@ -246,26 +247,26 @@ def run_direct_mode(file_path_arg: str, spool_id: int | None, auto_confirm: bool
     except (UnsupportedFormatError, MissingMetadataError) as exc:
         print(f"Error al analizar el archivo: {exc}")
         return 1
+    except NoCompatibleSpoolError:
+        print(
+            f"Error: No hay bobinas de '{metadata.material}' "
+            f"con al menos {metadata.grams}g disponibles."
+        )
+        print("Inventario actual:")
+        try:
+            spools = db.get_all_spools()
+        except Exception:
+            spools = []
+        if not spools:
+            print("  (No hay bobinas registradas en la base de datos)")
+        else:
+            for spool in spools:
+                print(
+                    f"  - ID {spool['id']}: {spool['material']} "
+                    f"({spool['remaining_weight_g']}g restantes)"
+                )
+        return 1
     except ValueError as exc:
-        if metadata is not None and "no compatible spools" in str(exc).lower():
-            print(
-                f"Error: No hay bobinas de '{metadata.material}' "
-                f"con al menos {metadata.grams}g disponibles."
-            )
-            print("Inventario actual:")
-            try:
-                spools = db.get_all_spools()
-            except Exception:
-                spools = []
-            if not spools:
-                print("  (No hay bobinas registradas en la base de datos)")
-            else:
-                for spool in spools:
-                    print(
-                        f"  - ID {spool['id']}: {spool['material']} "
-                        f"({spool['remaining_weight_g']}g restantes)"
-                    )
-            return 1
         print(f"Error: {exc}")
         return 1
     except Exception as exc:
