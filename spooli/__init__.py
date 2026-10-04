@@ -1,5 +1,6 @@
 """Spooli package.
 
-The flat modules at the repository root stay importable during Phase 1;
-shared configuration lives in the ``spooli.constants`` subpackage.
+The flat modules at the repository root stay importable during the
+refactor; shared configuration lives in ``spooli.constants`` and the SQLite
+persistence layer in ``spooli.storage``.
 """

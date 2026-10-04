@@ -73,7 +73,7 @@ def _pause() -> None:
 def get_recent_prints(limit: int = DEFAULT_HISTORY_LIMIT) -> list[dict]:
     """Return the most recent print jobs, newest first."""
     db.init_db()
-    with db.get_connection() as conn:
+    with db.connection_scope() as conn:
         rows = conn.execute(
             "SELECT * FROM prints ORDER BY id DESC LIMIT ?",
             (int(limit),),
@@ -243,7 +243,7 @@ def register_failed_print() -> dict | None:
     if target is None:
         # Look it up directly in case it is older than the recent window.
         try:
-            with db.get_connection() as conn:
+            with db.connection_scope() as conn:
                 row = conn.execute(
                     "SELECT * FROM prints WHERE id = ?", (print_id,)
                 ).fetchone()
